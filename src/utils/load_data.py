@@ -54,6 +54,12 @@ def save_to_hdf5(news_list, filename, disable_tqdm=False):
 
         n = len(news_list)
 
+        ids = file.create_dataset(
+            'id',
+            (n,),
+            dtype=h5py.string_dtype()
+        )
+
         # String datasets
         texts = file.create_dataset('text', (n,),
                                       dtype=h5py.string_dtype())
@@ -64,7 +70,8 @@ def save_to_hdf5(news_list, filename, disable_tqdm=False):
         for i, article in tqdm(enumerate(news_list),
                                total=n,
                                disable=disable_tqdm):
-
+            
+            ids[i] = str(article["id"])
             texts[i] = str(article["text"]) if article["text"] else ""
 
             # Se tiver embedding
@@ -95,6 +102,13 @@ def load_embeddings_from_hdf5(filename):
             for u in texts
         ]
 
+        ids = f["id"][:]
+
+        ids = [
+            x.decode("utf-8") if isinstance(x, bytes) else x
+            for x in ids
+        ]
+
         total_articles = len(texts)
 
         # Carrega embeddings
@@ -109,7 +123,7 @@ def load_embeddings_from_hdf5(filename):
         for i in range(total_articles):
             embeddings[i] = np.array(embedding_group[str(i)])
 
-    return embeddings, texts
+    return embeddings, texts, ids
 
 def load_embedding_shards(embeddings_files, disable_tqdm=False):
     """
@@ -126,13 +140,15 @@ def load_embedding_shards(embeddings_files, disable_tqdm=False):
 
     embeddings = []
     texts = []
+    ids = []
 
     for file in tqdm(embeddings_files, disable=disable_tqdm):
-        embeddings_shard, texts_shard = load_embeddings_from_hdf5(file)
+        embeddings_shard, texts_shard, ids_shard = load_embeddings_from_hdf5(file)
         embeddings.append(embeddings_shard)
         texts.extend(texts_shard)
+        ids.extend(ids_shard)
 
-    return np.concatenate(embeddings, axis=0), texts
+    return np.concatenate(embeddings, axis=0), texts, ids
 
 def save_organized_clusters(df, output_folder):
     output_path = os.path.join(output_folder, "articles_merged_cleaned_clustered_organized.csv")

@@ -130,8 +130,9 @@ def main():
 
         for i in range(len(obj.texts)):
             article = {
+                "id": obj.ids[i],
                 "text": obj.texts[i],
-                "embedding": obj.embeddings[i] if i < len(obj.embeddings) else None
+                "embedding": obj.embeddings[i]
             }
             news_list.append(article)
 
