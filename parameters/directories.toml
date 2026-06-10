@@ -1,0 +1,16 @@
+# Produtos processados pela camada NLP. Cada item e o stem do arquivo
+# *_merged.csv gerado pelo merger (em data/processed). Cada produto e
+# embedado, clusterizado e auditado de forma independente, espelhando a
+# separacao por produto adotada pelo SubFraudGMM.
+products = [
+    "escavadeira_final_merged",
+    "motoniveladora_final_merged",
+    "rolo_compactador_final_merged",
+    "trator_esteira_final_merged",
+]
+
+[paths]
+raw = "data/raw"
+processed = "data/processed"
+checkpoints = "data/checkpoints"
+output = "data/output"

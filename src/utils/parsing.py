@@ -36,6 +36,7 @@ def load_config(args: argparse.Namespace) -> Dict[str, Any]:
 
     cfg = {
         "paths": dirs_file["paths"],
+        "products": dirs_file.get("products", []),
         "initial_embedding": initial_embedding_file,
         "graph_construction": graph_construction_file["graph_construction"],
         "community_detection": graph_construction_file["community_detection"],

@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import pandas as pd
-import sys
 from glob import glob
 from pathlib import Path
 
@@ -12,16 +11,12 @@ from utils.parsing import parse_args, load_config, extract_cluster_id, parse_clu
 from utils.hypersphere import get_representative_articles, get_centroids
 from utils.load_data import ensure_dirs, load_embedding_shards, align_to_df
 
-def truncate(text, max_chars=4000):
-    return text[:max_chars]
 
-def main():
-# Define prompt templates
-    DEFINITION_PROMPT = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """
+DEFINITION_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            """
     Você é um auditor fiscal sênior com 20 anos de experiência em controle interno de licitações públicas brasileiras, especializado em detecção de fraudes, conluio entre fornecedores (cartel de licitação), direcionamento de edital e superfaturamento.
 
     Seu raciocínio segue a metodologia de auditoria baseada em risco do TCU (Tribunal de Contas da União). Você conhece profundamente:
@@ -31,10 +26,10 @@ def main():
 
     Ao analisar, você pensa em voz alta de forma estruturada antes de concluir. Nunca omite campos mesmo se a evidência for fraca — registre "Sem indícios detectados" nesses casos.
     """
-            ),
-            (
-                "user",
-                """
+        ),
+        (
+            "user",
+            """
     ## TAREFA: ANÁLISE DE CLUSTER DE LICITAÇÕES
 
     Analise o seguinte conjunto de registros de licitações públicas brasileiras. Cada registro representa um item licitado com métricas de risco pré-calculadas.
@@ -97,209 +92,194 @@ def main():
 
     Responda APENAS com as seções numeradas acima, sem texto introdutório ou conclusivo fora delas.
     """
-            )
-        ]
-    )
+        )
+    ]
+)
 
-    args = parse_args()
-    cfg = load_config(args)
 
-    paths = cfg["paths"]
-    ensure_dirs(paths["raw"], paths["processed"], paths["checkpoints"], paths["output"])
+def truncate(text, max_chars=4000):
+    return text[:max_chars]
 
-    required_fields = cfg['definition']['required_fields']
 
-    llm = ChatOllama(
-        model="qwen2.5:7b",
-        temperature=cfg['llm']['temperature']
-    )
-
-    cluster_directory = Path(cfg["paths"]["processed"]) / "separated clusters"
-    cluster_files = glob(os.path.join(cluster_directory, "cluster_*.csv"))
-    output_directory = f'{cfg["paths"]["output"]}'
-
-    solicitacoes_file = Path(cfg["paths"]["processed"]) / "trator_esteira_final_merged_clustered.csv"
-
-    solicitacoes_df = pd.read_csv(solicitacoes_file)
-
-    # Garante que as métricas de risco vindas do SubFraudGMM (merge à esquerda,
-    # podem conter NaN para registros sem correspondência) sejam numéricas.
-    risk_columns = ["Risk_Mean", "Risk_Std", "Risk_Max", "Rank_Mean"]
-    for col in risk_columns:
-        if col in solicitacoes_df.columns:
-            solicitacoes_df[col] = pd.to_numeric(solicitacoes_df[col], errors="coerce")
+def build_texto_cluster(df):
+    """
+    Monta o texto por registro enviado ao auditor LLM, carregando metadados e os
+    sinais quantitativos do SubFraudGMM (Risk_*/Rank). Sem isso, o modelo
+    raciocinaria sem acesso ao próprio indicador de risco que fundamenta o trabalho.
+    """
+    # Garante que as métricas de risco (merge à esquerda pode deixar NaN) sejam numéricas.
+    for col in ["Risk_Mean", "Risk_Std", "Risk_Max", "Rank_Mean"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     def _fmt(series, decimals=None):
-        """Formata uma coluna para texto, preservando legibilidade e tratando ausências."""
         s = series.round(decimals) if decimals is not None else series
         return s.astype(object).where(series.notna(), "N/D").astype(str)
 
-    # O texto enviado ao auditor LLM precisa carregar os sinais quantitativos do
-    # SubFraudGMM (Risk_*/Rank) além dos metadados, senão o modelo "raciocina" sem
-    # acesso ao próprio indicador de risco que fundamenta o trabalho.
-    solicitacoes_df["texto_cluster"] = (
-        "Município: " + solicitacoes_df["Ente"].astype(str)
-        + ". Empresa: " + solicitacoes_df["nomeParticipante"].astype(str)
-        + ". Objeto: " + solicitacoes_df["Descrição Item Licitação"].astype(str)
-        + ". Ano: " + solicitacoes_df["Ano"].astype(str)
-        + ". Valor total cotado: " + solicitacoes_df["Valor Total Cotado Item"].astype(str)
-        + ". Preço unitário: " + _fmt(solicitacoes_df["unit_price"], 2)
-        + ". Participantes: " + solicitacoes_df["num_partic"].astype(str)
-        + ". Venceu este item: " + _fmt(solicitacoes_df["auction_winner_flag"])
-        + ". Taxa de vitória do fornecedor na unidade (win): " + _fmt(solicitacoes_df["win"], 3)
-        + ". Duração do certame (dias): " + _fmt(solicitacoes_df["duration"])
-        + ". Proporção de vencedores únicos na unidade (unique): " + _fmt(solicitacoes_df["unique"], 3)
-        + ". Risco médio GMM (Risk_Mean): " + _fmt(solicitacoes_df["Risk_Mean"], 3)
-        + ". Desvio do risco (Risk_Std): " + _fmt(solicitacoes_df["Risk_Std"], 3)
-        + ". Risco máximo (Risk_Max): " + _fmt(solicitacoes_df["Risk_Max"], 3)
-        + ". Ranking de risco (Rank_Mean): " + _fmt(solicitacoes_df["Rank_Mean"])
-        + ". Cluster semântico: " + solicitacoes_df["Cluster ID"].astype(str)
+    return (
+        "Município: " + df["Ente"].astype(str)
+        + ". Empresa: " + df["nomeParticipante"].astype(str)
+        + ". Objeto: " + df["Descrição Item Licitação"].astype(str)
+        + ". Ano: " + df["Ano"].astype(str)
+        + ". Valor total cotado: " + df["Valor Total Cotado Item"].astype(str)
+        + ". Preço unitário: " + _fmt(df["unit_price"], 2)
+        + ". Participantes: " + df["num_partic"].astype(str)
+        + ". Venceu este item: " + _fmt(df["auction_winner_flag"])
+        + ". Taxa de vitória do fornecedor na unidade (win): " + _fmt(df["win"], 3)
+        + ". Duração do certame (dias): " + _fmt(df["duration"])
+        + ". Proporção de vencedores únicos na unidade (unique): " + _fmt(df["unique"], 3)
+        + ". Risco médio GMM (Risk_Mean): " + _fmt(df["Risk_Mean"], 3)
+        + ". Desvio do risco (Risk_Std): " + _fmt(df["Risk_Std"], 3)
+        + ". Risco máximo (Risk_Max): " + _fmt(df["Risk_Max"], 3)
+        + ". Ranking de risco (Rank_Mean): " + _fmt(df["Rank_Mean"])
+        + ". Cluster semântico: " + df["Cluster ID"].astype(str)
     )
 
-    print(solicitacoes_df.iloc[0].to_dict())
 
-    cluster_csv_file = 'clusters_defined.csv'
-    output_path = os.path.join(output_directory, cluster_csv_file)
+def define_clusters_for_product(product, cfg, definition_chain):
+    """Gera as definições textuais do auditor para os clusters de um produto."""
+    paths = cfg["paths"]
 
-    if os.path.exists(output_path):
-        cluster_definitions_df = pd.read_csv(output_path)
-        cluster_definitions = cluster_definitions_df.to_dict('records')
-        processed_clusters = set(cluster_definitions_df['Cluster ID'].values.tolist())
-    else:
-        cluster_definitions = []
-        processed_clusters = set()
-    
-    shard_directory = Path(cfg["paths"]["raw"]) / "shards_h5"
-    files = glob(os.path.join(shard_directory, '*.h5'))
+    cluster_directory = os.path.join(paths["processed"], "separated clusters", product)
+    cluster_files = glob(os.path.join(cluster_directory, "cluster_*.csv"))
+    output_directory = os.path.join(paths["output"], product)
+    solicitacoes_file = os.path.join(paths["processed"], f"{product}_clustered.csv")
+    shard_directory = os.path.join(paths["raw"], "shards_h5", product)
 
-    embeddings, texts, ids = load_embedding_shards(files)
+    if not cluster_files:
+        print(f"[{product}] nenhum cluster em {cluster_directory}, pulando.")
+        return
+    if not os.path.exists(solicitacoes_file):
+        print(f"[{product}] {solicitacoes_file} não encontrado, pulando.")
+        return
 
-    print("Primeiros IDs do dataframe:")
-    print(solicitacoes_df["ID"].head(10).tolist())
+    os.makedirs(output_directory, exist_ok=True)
 
-    print("Primeiros IDs dos embeddings:")
-    print(ids[:10])
+    solicitacoes_df = pd.read_csv(solicitacoes_file)
 
-    print("Tipo df ID:", type(solicitacoes_df["ID"].iloc[0]))
-    print("Tipo embedding ID:", type(ids[0]))
+    # Considera apenas registros que receberam cluster.
+    solicitacoes_df = solicitacoes_df[solicitacoes_df["Cluster ID"].notna()].copy()
+    solicitacoes_df["Cluster ID"] = solicitacoes_df["Cluster ID"].astype(int)
 
-    aligned_embeddings, aligned_ids = align_to_df(
-        embeddings,
-        ids,
-        solicitacoes_df
-    )
+    solicitacoes_df["texto_cluster"] = build_texto_cluster(solicitacoes_df)
 
-    centroids = get_centroids(
-    aligned_embeddings,
-    solicitacoes_df['Cluster ID'].values
-    )
+    shards_files = glob(os.path.join(shard_directory, '*.h5'))
+    embeddings, texts, ids = load_embedding_shards(shards_files)
 
-    #sources = solicitacoes_df['source'].values
-    definition_chain = DEFINITION_PROMPT | llm
+    aligned_embeddings, aligned_ids = align_to_df(embeddings, ids, solicitacoes_df)
 
-    print("Iniciando processamento de clusters...")
+    labels = solicitacoes_df['Cluster ID'].values
+    centroids = get_centroids(aligned_embeddings, labels)
+
+    unique_labels = np.unique(labels)
+    label_to_row = {int(label): row for row, label in enumerate(unique_labels)}
+
+    print(f"[{product}] iniciando definição de {len(cluster_files)} clusters...")
 
     for cluster_file in cluster_files:
 
         label = int(Path(cluster_file).stem.split("_")[1])
 
-        if label in processed_clusters:
+        output_path = os.path.join(output_directory, f"cluster_{label}.txt")
+
+        # Retomada: pula clusters já definidos.
+        if os.path.exists(output_path):
             continue
 
-        print(f"Processando cluster {label}...")
+        if label not in label_to_row:
+            print(f"[{product}] cluster {label} sem centróide correspondente, ignorando.")
+            continue
 
         cluster_df = pd.read_csv(cluster_file)
-
-        number_of_articles = min(
-            cfg['definition']['max_article_number'],
-            len(cluster_df)
-        )
+        number_of_articles = min(cfg['definition']['max_article_number'], len(cluster_df))
 
         cluster_mask = solicitacoes_df['Cluster ID'] == label
-
         cluster_embeddings = aligned_embeddings[cluster_mask]
-
-        cluster_texts = solicitacoes_df.loc[
-            cluster_mask,
-            "texto_cluster"
-        ].values
+        cluster_texts = solicitacoes_df.loc[cluster_mask, "texto_cluster"].values
 
         cluster_articles = get_representative_articles(
-            centroids[label],
+            centroids[label_to_row[label]],
             cluster_embeddings,
             cluster_texts,
             number_of_articles
         )
 
         cluster_articles = [truncate(a) for a in cluster_articles]
-
         chain_input = {"articles": "\n\n".join(cluster_articles)}
 
         raw_output = definition_chain.invoke(chain_input)
 
-        with open(f"{output_directory}/cluster_{label}.txt", "w", encoding="utf-8") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(raw_output.content)
 
-        print(f"Cluster {label} salvo.")
+        print(f"[{product}] cluster {label} salvo.")
 
-def json_converter():
 
+def main():
     args = parse_args()
     cfg = load_config(args)
 
     paths = cfg["paths"]
     ensure_dirs(paths["raw"], paths["processed"], paths["checkpoints"], paths["output"])
 
-    clusters_directory = f'{cfg["paths"]["output"]}'
-    output_directory = f'{cfg["paths"]["processed"]}'
+    llm = ChatOllama(
+        model=cfg['llm'].get('model_name', 'qwen2.5:7b'),
+        temperature=cfg['llm']['temperature']
+    )
+    definition_chain = DEFINITION_PROMPT | llm
 
-    cluster_json_file = 'clusters_licitacoes_defined.json'
-    cluster_csv_file = 'clusters_licitacoes_defined.csv'
-    dataset_file = Path(cfg["paths"]["processed"]) / "trator_esteira_final_merged_clustered.csv"
+    for product in cfg["products"]:
+        print(f"=== Definição de clusters: {product} ===")
+        define_clusters_for_product(product, cfg, definition_chain)
 
-    shard_directory = Path(cfg["paths"]["raw"]) / "shards_h5"
-    shards_files = glob(os.path.join(shard_directory, '*.h5'))
 
-    # Arquivos de definição produzidos pelo auditor LLM (um .txt por cluster).
+def convert_product(product, cfg):
+    """Converte as definições textuais (.txt) de um produto em CSV/JSON estruturados."""
+    paths = cfg["paths"]
+
+    clusters_directory = os.path.join(paths["output"], product)
+    dataset_file = os.path.join(paths["processed"], f"{product}_clustered.csv")
+    shard_directory = os.path.join(paths["raw"], "shards_h5", product)
+
+    cluster_csv_file = os.path.join(paths["processed"], f"{product}_clusters_defined.csv")
+    cluster_json_file = os.path.join(paths["processed"], f"{product}_clusters_defined.json")
+
     definition_files = glob(os.path.join(clusters_directory, "cluster_*.txt"))
 
-    df = pd.read_csv(dataset_file)
+    if not definition_files:
+        print(f"[{product}] nenhuma definição .txt em {clusters_directory}, pulando.")
+        return
+    if not os.path.exists(dataset_file):
+        print(f"[{product}] {dataset_file} não encontrado, pulando.")
+        return
 
-    # Considera apenas registros que receberam cluster (merge à esquerda e a
-    # detecção de comunidades podem deixar Cluster ID nulo).
+    df = pd.read_csv(dataset_file)
     df = df[df["Cluster ID"].notna()].copy()
     df["Cluster ID"] = df["Cluster ID"].astype(int)
 
     cluster_sizes = df.groupby("Cluster ID").size()
 
-    cluster_records = []
-
-    # Os embeddings vêm dos shards .h5 (não dos .txt de definição) e são
-    # reordenados para casar com a ordem do dataframe.
+    shards_files = glob(os.path.join(shard_directory, '*.h5'))
     embeddings, texts, ids = load_embedding_shards(shards_files)
 
-    aligned_embeddings, aligned_ids = align_to_df(
-        embeddings,
-        ids,
-        df
-    )
+    aligned_embeddings, aligned_ids = align_to_df(embeddings, ids, df)
 
     labels = df['Cluster ID'].values
     centroids = get_centroids(aligned_embeddings, labels)
 
-    # Mapeia cada rótulo de cluster para a linha correspondente na matriz de
-    # centróides (get_centroids ordena por np.unique dos rótulos).
     unique_labels = np.unique(labels)
     label_to_row = {int(label): row for row, label in enumerate(unique_labels)}
 
     centroid_similarities = centroids.dot(centroids.T) - np.eye(centroids.shape[0])
+
+    cluster_records = []
 
     for file in definition_files:
 
         cluster_id = extract_cluster_id(file)
 
         if cluster_id not in label_to_row:
-            print(f"Aviso: cluster {cluster_id} sem centróide correspondente, ignorando.")
+            print(f"[{product}] cluster {cluster_id} sem centróide correspondente, ignorando.")
             continue
 
         sections = parse_cluster_definition(file)
@@ -309,7 +289,7 @@ def json_converter():
         most_similar_label = int(unique_labels[most_similar_row])
         similarity = float(centroid_similarities[row, most_similar_row])
 
-        record = {
+        cluster_records.append({
             "Cluster ID": cluster_id,
             "Tamanho": int(cluster_sizes.get(cluster_id, 0)),
             "Nome": sections["Nome"],
@@ -321,24 +301,27 @@ def json_converter():
             "Veredicto": sections["Veredicto"],
             "Cluster Mais Similar": most_similar_label,
             "Similaridade": similarity,
-        }
+        })
 
-        cluster_records.append(record)
+    clusters_df = pd.DataFrame(cluster_records).sort_values("Cluster ID")
 
-    clusters_df = pd.DataFrame(cluster_records)
+    clusters_df.to_csv(cluster_csv_file, index=False)
+    clusters_df.to_json(cluster_json_file, orient="records", indent=2, force_ascii=False)
 
-    clusters_df = clusters_df.sort_values("Cluster ID")
+    print(f"[{product}] dataset de definições criado com sucesso!")
 
-    clusters_df.to_csv(os.path.join(output_directory, cluster_csv_file), index=False)
 
-    clusters_df.to_json(
-        os.path.join(output_directory, cluster_json_file),
-        orient="records",
-        indent=2,
-        force_ascii=False
-    )
+def json_converter():
+    args = parse_args()
+    cfg = load_config(args)
 
-    print("Dataset criado com sucesso!")
+    paths = cfg["paths"]
+    ensure_dirs(paths["raw"], paths["processed"], paths["checkpoints"], paths["output"])
+
+    for product in cfg["products"]:
+        print(f"=== Conversão JSON: {product} ===")
+        convert_product(product, cfg)
+
 
 if __name__ == '__main__':
     os.chdir('..')
