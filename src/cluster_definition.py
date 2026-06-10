@@ -40,14 +40,16 @@ def main():
     Analise o seguinte conjunto de registros de licitações públicas brasileiras. Cada registro representa um item licitado com métricas de risco pré-calculadas.
 
     ### LEGENDA DOS CAMPOS
-    - `unit_price`: Preço unitário praticado
-    - `num_partic`: Número de participantes na disputa
-    - `win`: Flag se o participante venceu (1=sim)
-    - `Risk_Mean / Risk_Std / Risk_Max`: Índices de risco (0–1, quanto maior, mais suspeito)
-    - `Rank_Mean`: Posição de risco relativa ao universo total
-    - `Cluster_ID`: Agrupamento semântico do produto
-    - `duration`: Dias entre abertura e homologação
-    - `unique`: Participante exclusivo nesse tipo de licitação
+    - `Valor total cotado`: Valor total do item cotado (R$)
+    - `Preço unitário (unit_price)`: Preço unitário praticado (R$)
+    - `Participantes (num_partic)`: Número de participantes na disputa
+    - `Venceu este item (auction_winner_flag)`: 1 = o fornecedor venceu este item; 0 = não
+    - `Taxa de vitória (win)`: Proporção de vitórias do fornecedor na mesma unidade gestora (0–1; quanto maior, mais dominante)
+    - `Duração do certame (duration)`: Dias entre abertura e homologação
+    - `Vencedores únicos (unique)`: Proporção de vencedores distintos na unidade gestora (0–1; valores baixos indicam concentração)
+    - `Risco médio/desvio/máximo (Risk_Mean / Risk_Std / Risk_Max)`: Índices de risco do SubFraudGMM (0–1; quanto maior, mais suspeito)
+    - `Ranking de risco (Rank_Mean)`: Posição média de risco relativa ao universo total (menor = mais arriscado)
+    - `Cluster semântico (Cluster ID)`: Agrupamento semântico do registro
 
     ### REGISTROS
 
@@ -120,13 +122,38 @@ def main():
 
     solicitacoes_df = pd.read_csv(solicitacoes_file)
 
+    # Garante que as métricas de risco vindas do SubFraudGMM (merge à esquerda,
+    # podem conter NaN para registros sem correspondência) sejam numéricas.
+    risk_columns = ["Risk_Mean", "Risk_Std", "Risk_Max", "Rank_Mean"]
+    for col in risk_columns:
+        if col in solicitacoes_df.columns:
+            solicitacoes_df[col] = pd.to_numeric(solicitacoes_df[col], errors="coerce")
+
+    def _fmt(series, decimals=None):
+        """Formata uma coluna para texto, preservando legibilidade e tratando ausências."""
+        s = series.round(decimals) if decimals is not None else series
+        return s.astype(object).where(series.notna(), "N/D").astype(str)
+
+    # O texto enviado ao auditor LLM precisa carregar os sinais quantitativos do
+    # SubFraudGMM (Risk_*/Rank) além dos metadados, senão o modelo "raciocina" sem
+    # acesso ao próprio indicador de risco que fundamenta o trabalho.
     solicitacoes_df["texto_cluster"] = (
         "Município: " + solicitacoes_df["Ente"].astype(str)
         + ". Empresa: " + solicitacoes_df["nomeParticipante"].astype(str)
         + ". Objeto: " + solicitacoes_df["Descrição Item Licitação"].astype(str)
         + ". Ano: " + solicitacoes_df["Ano"].astype(str)
-        + ". Valor: " + solicitacoes_df["Valor Total Cotado Item"].astype(str)
+        + ". Valor total cotado: " + solicitacoes_df["Valor Total Cotado Item"].astype(str)
+        + ". Preço unitário: " + _fmt(solicitacoes_df["unit_price"], 2)
         + ". Participantes: " + solicitacoes_df["num_partic"].astype(str)
+        + ". Venceu este item: " + _fmt(solicitacoes_df["auction_winner_flag"])
+        + ". Taxa de vitória do fornecedor na unidade (win): " + _fmt(solicitacoes_df["win"], 3)
+        + ". Duração do certame (dias): " + _fmt(solicitacoes_df["duration"])
+        + ". Proporção de vencedores únicos na unidade (unique): " + _fmt(solicitacoes_df["unique"], 3)
+        + ". Risco médio GMM (Risk_Mean): " + _fmt(solicitacoes_df["Risk_Mean"], 3)
+        + ". Desvio do risco (Risk_Std): " + _fmt(solicitacoes_df["Risk_Std"], 3)
+        + ". Risco máximo (Risk_Max): " + _fmt(solicitacoes_df["Risk_Max"], 3)
+        + ". Ranking de risco (Rank_Mean): " + _fmt(solicitacoes_df["Rank_Mean"])
+        + ". Cluster semântico: " + solicitacoes_df["Cluster ID"].astype(str)
     )
 
     print(solicitacoes_df.iloc[0].to_dict())
