@@ -8,7 +8,7 @@ from pathlib import Path
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 
-from utils.parsing import parse_args, load_config, extract_cluster_id, load_and_parse_cluster_file
+from utils.parsing import parse_args, load_config, extract_cluster_id, parse_cluster_definition
 from utils.hypersphere import get_representative_articles, get_centroids
 from utils.load_data import ensure_dirs, load_embedding_shards, align_to_df
 
@@ -253,54 +253,74 @@ def json_converter():
     clusters_directory = f'{cfg["paths"]["output"]}'
     output_directory = f'{cfg["paths"]["processed"]}'
 
-    cluster_json_file = 'clusters_open_tickets_defined.json'
-    cluster_csv_file = 'clusters_open_tickets_defined.csv'
+    cluster_json_file = 'clusters_licitacoes_defined.json'
+    cluster_csv_file = 'clusters_licitacoes_defined.csv'
     dataset_file = Path(cfg["paths"]["processed"]) / "trator_esteira_final_merged_clustered.csv"
 
     shard_directory = Path(cfg["paths"]["raw"]) / "shards_h5"
     shards_files = glob(os.path.join(shard_directory, '*.h5'))
 
-    files = glob(os.path.join(clusters_directory, "*.txt"))
+    # Arquivos de definição produzidos pelo auditor LLM (um .txt por cluster).
+    definition_files = glob(os.path.join(clusters_directory, "cluster_*.txt"))
 
     df = pd.read_csv(dataset_file)
+
+    # Considera apenas registros que receberam cluster (merge à esquerda e a
+    # detecção de comunidades podem deixar Cluster ID nulo).
+    df = df[df["Cluster ID"].notna()].copy()
+    df["Cluster ID"] = df["Cluster ID"].astype(int)
 
     cluster_sizes = df.groupby("Cluster ID").size()
 
     cluster_records = []
 
-    embeddings, texts, ids = load_embedding_shards(files)
+    # Os embeddings vêm dos shards .h5 (não dos .txt de definição) e são
+    # reordenados para casar com a ordem do dataframe.
+    embeddings, texts, ids = load_embedding_shards(shards_files)
 
     aligned_embeddings, aligned_ids = align_to_df(
         embeddings,
         ids,
-        solicitacoes_df
+        df
     )
 
-    centroids = get_centroids(
-        aligned_embeddings,
-        df['Cluster ID'].values
-    )
+    labels = df['Cluster ID'].values
+    centroids = get_centroids(aligned_embeddings, labels)
+
+    # Mapeia cada rótulo de cluster para a linha correspondente na matriz de
+    # centróides (get_centroids ordena por np.unique dos rótulos).
+    unique_labels = np.unique(labels)
+    label_to_row = {int(label): row for row, label in enumerate(unique_labels)}
 
     centroid_similarities = centroids.dot(centroids.T) - np.eye(centroids.shape[0])
 
-    for file in files:
+    for file in definition_files:
 
         cluster_id = extract_cluster_id(file)
 
-        keywords, title, description, focus = load_and_parse_cluster_file(file)
+        if cluster_id not in label_to_row:
+            print(f"Aviso: cluster {cluster_id} sem centróide correspondente, ignorando.")
+            continue
 
-        most_similar = np.argmax(centroid_similarities[cluster_id])
-        similarity = centroid_similarities[cluster_id, most_similar]
+        sections = parse_cluster_definition(file)
+
+        row = label_to_row[cluster_id]
+        most_similar_row = int(np.argmax(centroid_similarities[row]))
+        most_similar_label = int(unique_labels[most_similar_row])
+        similarity = float(centroid_similarities[row, most_similar_row])
 
         record = {
             "Cluster ID": cluster_id,
-            "Title": title,
-            "Size": int(cluster_sizes.get(cluster_id, 0)),
-            "Keywords": "; ".join(keywords),
-            "Description": description,
-            "Focus": focus,
-            "Most Similar Cluster": int(most_similar),
-            "Similarity": float(similarity)
+            "Tamanho": int(cluster_sizes.get(cluster_id, 0)),
+            "Nome": sections["Nome"],
+            "Tipo de Aquisicao": sections["Tipo de Aquisicao"],
+            "Perfil dos Fornecedores": sections["Perfil dos Fornecedores"],
+            "Faixa de Valores": sections["Faixa de Valores"],
+            "Padroes Recorrentes": sections["Padroes Recorrentes"],
+            "Indicios de Risco": sections["Indicios de Risco"],
+            "Veredicto": sections["Veredicto"],
+            "Cluster Mais Similar": most_similar_label,
+            "Similaridade": similarity,
         }
 
         cluster_records.append(record)
