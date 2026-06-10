@@ -1,3 +1,4 @@
+import re
 import argparse
 import tomllib
 from pathlib import Path
@@ -47,7 +48,9 @@ def load_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 def extract_cluster_id(filename):
 
-    match = re.search(r"(\d+)", filename)
+    # Usa apenas o nome do arquivo (ex.: 'cluster_3.txt') para evitar capturar
+    # dígitos que apareçam no caminho do diretório.
+    match = re.search(r"(\d+)", Path(filename).stem)
     return int(match.group(1))
 
 def load_and_parse_cluster_file(filepath):
@@ -101,14 +104,65 @@ def parse_distinction_file(filepath):
 
     return "; ".join(matches)
 
-import re
 
 def clean_llm_text(text):
 
-    text = re.sub(r"#+", "", text)      
-    text = re.sub(r"\*\*", "", text)    
-    text = re.sub(r"- ", "", text)       
-    text = text.replace("\n", " ")       
-    text = re.sub(r"\s+", " ", text)     
+    text = re.sub(r"#+", "", text)
+    text = re.sub(r"\*\*", "", text)
+    text = re.sub(r"- ", "", text)
+    text = text.replace("\n", " ")
+    text = re.sub(r"\s+", " ", text)
 
     return text.strip()
+
+
+# Mapeia o número de cada seção do prompt do auditor (DEFINITION_PROMPT, [1]..[7])
+# para um nome de campo legível usado no CSV/JSON consolidado.
+CLUSTER_SECTION_FIELDS = {
+    1: "Nome",
+    2: "Tipo de Aquisicao",
+    3: "Perfil dos Fornecedores",
+    4: "Faixa de Valores",
+    5: "Padroes Recorrentes",
+    6: "Indicios de Risco",
+    7: "Veredicto",
+}
+
+# Cabeçalho de seção: número entre colchetes, possivelmente precedido por
+# marcações markdown (**, #, >) que o LLM costuma emitir.
+_SECTION_HEADER = re.compile(r"^\s*[*#>\s]*\[(\d+)\]")
+
+
+def parse_cluster_definition(filepath):
+    """
+    Parsing determinístico da saída textual do auditor LLM, que segue o formato
+    de 7 seções numeradas ([1]..[7]) definido em DEFINITION_PROMPT.
+
+    A linha de cabeçalho de cada seção é descartada; apenas o corpo é mantido.
+    Retorna um dict {nome_do_campo: texto}, usando "Sem indícios detectados"
+    como valor padrão para seções ausentes.
+    """
+    with open(filepath, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    raw_sections = {}
+    current = None
+    buffer = []
+    for line in lines:
+        match = _SECTION_HEADER.match(line)
+        if match:
+            if current is not None:
+                raw_sections[current] = "".join(buffer)
+            current = int(match.group(1))
+            buffer = []
+        elif current is not None:
+            buffer.append(line)
+    if current is not None:
+        raw_sections[current] = "".join(buffer)
+
+    parsed = {}
+    for number, field in CLUSTER_SECTION_FIELDS.items():
+        body = raw_sections.get(number, "").strip()
+        parsed[field] = clean_llm_text(body) if body else "Sem indícios detectados"
+
+    return parsed
