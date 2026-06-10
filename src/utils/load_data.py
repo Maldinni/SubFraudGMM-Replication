@@ -150,8 +150,8 @@ def load_embedding_shards(embeddings_files, disable_tqdm=False):
 
     return np.concatenate(embeddings, axis=0), texts, ids
 
-def save_organized_clusters(df, output_folder):
-    output_path = os.path.join(output_folder, "articles_merged_cleaned_clustered_organized.csv")
+def save_organized_clusters(df, output_folder, filename="clustered_organized.csv"):
+    output_path = os.path.join(output_folder, filename)
     df.to_csv(output_path, index=False)
 
 def align_to_df(embeddings, ids, df):
