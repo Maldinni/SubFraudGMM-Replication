@@ -37,10 +37,17 @@ def build_graph_for_product(product, cfg, graph_cfg):
         )
 
     print(f'[{product}] Constructing k-NN graph...')
-    edges, weights = construct_knn_graph(embeddings, num_neighbors)
+    edges, weights = construct_knn_graph(
+        embeddings,
+        num_neighbors,
+        sim_threshold=graph_cfg.get('sim_threshold', 0.0),
+        center=graph_cfg.get('center_embeddings', True),
+    )
 
     print(f'[{product}] Creating igraph Graph object...')
-    G = ig.Graph(edges=edges, directed=False)
+    # n=num_points garante que vértices isolados (sem aresta após o threshold)
+    # existam e que os atributos por posição (texts/ids) fiquem alinhados.
+    G = ig.Graph(n=num_points, edges=edges, directed=False)
     G.vs['texts'] = texts
     G.vs['licitacao_id'] = ids
     G.es['weight'] = weights

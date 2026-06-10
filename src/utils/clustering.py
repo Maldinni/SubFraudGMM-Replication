@@ -44,19 +44,29 @@ def check_memory_constraints(num_points, k, available_memory_gb):
         return True
 
 
-def construct_knn_graph(embeddings, k):
+def construct_knn_graph(embeddings, k, sim_threshold=0.0, center=True):
     """
     Construct the symmetric k-NN graph using FAISS.
- 
+
     Parameters:
     - embeddings: np.array
     - k: int
- 
+    - sim_threshold: float, similaridade mínima (sobre os vetores centralizados)
+      para manter uma aresta. Deve ser >= 0 para garantir pesos positivos no Leiden.
+    - center: bool, se True subtrai a média dos embeddings antes de normalizar,
+      removendo o componente comum do texto (boilerplate) e espalhando as
+      similaridades — tornando o threshold efetivo.
+
     Returns:
     - edges: list of tuples
     - weights: list of floats
     """
-    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    if center:
+        embeddings = embeddings - embeddings.mean(axis=0, keepdims=True)
+
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms[norms == 0] = 1e-12  # evita divisão por zero em vetores nulos pós-centralização
+    embeddings = embeddings / norms
     num_points, dim = embeddings.shape
 
     # Build the FAISS index
@@ -69,17 +79,15 @@ def construct_knn_graph(embeddings, k):
     print("Performing k-NN search...")
     distances, indices = index.search(embeddings, k)
 
-    # Collect edges and weights
-    print("Constructing edge list...")
+    # Collect edges and weights (apenas arestas acima do threshold de similaridade)
+    print(f"Constructing edge list (sim_threshold={sim_threshold})...")
     edge_set = set()
-    weights = []
-    SIM_THRESHOLD = 0.7  # ajuste entre 0.7–0.85
 
     for i in tqdm(range(num_points)):
         for neighbor_idx, distance in zip(indices[i], distances[i]):
-            if neighbor_idx != i:
+            if neighbor_idx != i and distance >= sim_threshold:
                 edge = tuple(sorted((i, neighbor_idx)))
-                edge_set.add((edge, distance))
+                edge_set.add((edge, float(distance)))
 
     # Symmetrize the graph
     print("Symmetrizing the graph...")

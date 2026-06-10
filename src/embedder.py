@@ -14,14 +14,19 @@ from classes.data_types import Embeddings
 
 
 def build_embedding_text(selection):
-    """Monta o texto semântico de cada registro a ser embedado."""
+    """
+    Monta o texto semântico de cada registro a ser embedado.
+
+    Inclui apenas os campos com conteúdo semântico (município, empresa e objeto
+    licitado) e SEM rótulos fixos. Os campos numéricos (valor, ano, participantes)
+    são deliberadamente omitidos: o BERT não modela magnitude numérica e eles
+    apenas inflam a similaridade (boilerplate). A dimensão quantitativa é tratada
+    pelo SubFraudGMM, e todos esses campos seguem disponíveis ao auditor LLM.
+    """
     return (
-        "Município: " + selection["Ente"].astype(str) + ". " +
-        "Empresa: " + selection["nomeParticipante"].astype(str) + ". " +
-        "Objeto: " + selection["Descrição Item Licitação"].astype(str) + ". " +
-        "Ano: " + selection["Ano"].astype(str) + ". " +
-        "Valor: " + selection["Valor Total Cotado Item"].astype(str) + ". " +
-        "Participantes: " + selection["num_partic"].astype(str)
+        selection["Ente"].astype(str) + ". " +
+        selection["nomeParticipante"].astype(str) + ". " +
+        selection["Descrição Item Licitação"].astype(str)
     )
 
 
