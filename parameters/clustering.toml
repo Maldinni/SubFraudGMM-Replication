@@ -5,3 +5,11 @@ num_resolution_parameter = 1000
 [graph_construction]
 batch_size = 100
 num_neighbors = 50
+# Centraliza os embeddings (subtrai a média) antes de montar o grafo. Remove o
+# componente comum do texto (boilerplate), espalhando as similaridades e
+# permitindo que o threshold separe registros de fato parecidos.
+center_embeddings = true
+# Similaridade mínima (sobre os embeddings já centralizados) para manter uma
+# aresta. >= 0 garante pesos positivos para o Leiden. Aumente para clusters mais
+# finos/coesos; diminua para clusters maiores. Ajuste pela distribuição dos dados.
+sim_threshold = 0.3
