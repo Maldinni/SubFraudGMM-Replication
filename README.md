@@ -136,11 +136,11 @@ Configuration lives in `parameters/`:
 | `clustering.toml` | k-NN neighbours, similarity threshold, centring; Leiden resolution sweep |
 | `analysis/semantic.toml` | LLM model/temperature and records-per-cluster sent to the auditor |
 
-Key dependencies for this stage (not in `requirements.txt` yet): `sentence-transformers`,
-`faiss`, `python-igraph`, `leidenalg`, `h5py`, `langchain-ollama`, `psutil`, `tqdm`,
-`python-dotenv`. A running [Ollama](https://ollama.com) instance with the configured model
-(default `qwen2.5:7b`) is required for step 4. `src/config/settings.py` reads
-`LOCAL_BASEPATH` from a `keys.env` file at the repo root (used by the merge step).
+Stage-2 dependencies are listed in `requirements.txt` (`sentence-transformers`, `faiss-cpu`,
+`python-igraph`, `leidenalg`, `h5py`, `langchain-ollama`, `psutil`, `tqdm`, `python-dotenv`).
+A running [Ollama](https://ollama.com) instance with the configured model (default
+`qwen2.5:7b`) is required from step 4 onward. `src/config/settings.py` reads `LOCAL_BASEPATH`
+from a `keys.env` file at the repo root (used by the merge step). Requires Python ≥ 3.11.
 
 > **Note on the LLM auditor prompt:** the system prompt frames the model as an expert in
 > Brazilian procurement law (Lei 8.666/93, 14.133/21, 10.520/02). This is *persona priming*,

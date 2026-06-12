@@ -1,3 +1,6 @@
+# Requires Python >= 3.11 (uses the stdlib `tomllib` and PEP 604 `X | Y` type unions).
+
+# --- Stage 1: SubFraudGMM (subfraudgmm.py) + notebooks ---
 numpy>=1.21.0
 pandas>=1.3.0
 scipy>=1.7.0
@@ -5,6 +8,19 @@ scikit-learn>=1.0.0
 matplotlib>=3.4.0
 seaborn>=0.11.0
 jupyter>=1.0.0
+
+# --- Stage 2: semantic NLP layer (src/) ---
+sentence-transformers>=2.2.0   # embedder.py (legal-BERT)
+faiss-cpu>=1.7.0               # utils/clustering.py (k-NN similarity graph)
+python-igraph>=0.10.0          # graph_construction / community_detection / collusion_network
+leidenalg>=0.9.0               # community_detection / collusion_network (Leiden)
+h5py>=3.6.0                    # utils/load_data.py (HDF5 shards)
+psutil>=5.9.0                  # graph_construction.py (memory check)
+tqdm>=4.60.0                   # progress bars
+python-dotenv>=1.0.0           # config/settings.py (keys.env)
+langchain-ollama>=0.1.0        # cluster_definition / distinction / trends / collusion_network (LLM auditor)
+langchain-core>=0.2.0          # ChatPromptTemplate (pulled in by langchain-ollama; pinned explicitly)
+# NOTE: step 4+ also require a running Ollama instance with the configured model (default qwen2.5:7b).
 
 # notebook 01 only (HPC/PySpark environment):
 # pyspark>=3.2.0
