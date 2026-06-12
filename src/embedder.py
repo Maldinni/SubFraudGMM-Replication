@@ -5,7 +5,7 @@ from pathlib import Path
 from tqdm import tqdm
 import pandas as pd
 
-from utils.parsing import parse_args, load_config
+from utils.parsing import parse_args, load_config, chdir_to_project_root
 from utils.load_data import ensure_dirs, determine_output_filename, save_to_hdf5
 from utils.checkpoints import load_processed_documents, save_processed_documents
 from utils.embedding import unpack_embedding_parameters, save_embeddings, SentenceTransformerEmbeddings
@@ -107,7 +107,7 @@ def embed_product(product, cfg, embedding_model, sleep_time, items_per_shard):
 
 
 def main():
-    os.chdir('..')  # Change to project root directory
+    chdir_to_project_root()
     args = parse_args()
     cfg = load_config(args)
 

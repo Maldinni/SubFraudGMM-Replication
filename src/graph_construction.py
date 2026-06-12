@@ -3,7 +3,7 @@ import igraph as ig
 import psutil
 from glob import glob
 from utils.clustering import construct_knn_graph, check_memory_constraints
-from utils.parsing import parse_args, load_config
+from utils.parsing import parse_args, load_config, chdir_to_project_root
 from utils.load_data import ensure_dirs, load_embedding_shards
 
 
@@ -57,7 +57,7 @@ def build_graph_for_product(product, cfg, graph_cfg):
 
 
 def main():
-    os.chdir('..')  # Change to project root directory
+    chdir_to_project_root()
     args = parse_args()
     cfg = load_config(args)
 

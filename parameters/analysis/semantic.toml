@@ -5,3 +5,11 @@ max_article_number = 9
 [llm]
 model_name = 'qwen2.5:7b'
 temperature = 0.1
+
+[trends]
+# Eixo temporal por ano (dados da Operação Patrola vão de 2009 a 2020).
+# "antigo" = registros com ano em [older_cutoff, recent_cutoff); "recente" = ano >= recent_cutoff.
+older_cutoff = 2009
+recent_cutoff = 2015
+# Número de fornecedores (atores) listados por período e por movimentação (alta/baixa).
+top_actors = 5

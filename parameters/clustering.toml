@@ -13,3 +13,14 @@ center_embeddings = true
 # aresta. >= 0 garante pesos positivos para o Leiden. Aumente para clusters mais
 # finos/coesos; diminua para clusters maiores. Ajuste pela distribuição dos dados.
 sim_threshold = 0.3
+
+[collusion_network]
+# Rede fornecedor↔fornecedor: dois fornecedores são ligados quando vencem nas mesmas
+# unidades gestoras. Como o dataset é de registros vencedores (sem dados de perdedores),
+# inferimos anéis pelo footprint de mercado compartilhado, não por co-licitação direta.
+# Nº mínimo de unidades gestoras compartilhadas para criar uma aresta (recorrência).
+min_shared_units = 2
+# Tamanho mínimo da comunidade de fornecedores para ser considerada um anel suspeito.
+min_ring_size = 3
+# Nº de anéis (mais suspeitos) enviados ao auditor LLM para caracterização.
+top_rings_llm = 10

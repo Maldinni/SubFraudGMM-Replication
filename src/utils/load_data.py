@@ -155,28 +155,13 @@ def save_organized_clusters(df, output_folder, filename="clustered_organized.csv
     df.to_csv(output_path, index=False)
 
 def align_to_df(embeddings, ids, df):
-
+    """Reordena embeddings/ids para casar com a ordem dos registros em df["ID"]."""
     ids = np.array(ids)
-
-    print("repr embedding:", repr(ids[0]))
-    print("repr dataframe:", repr(df["ID"].iloc[0]))
-
-    print("tipo embedding:", type(ids[0]))
-    print("tipo dataframe:", type(df["ID"].iloc[0]))
-
-    print("len embedding:", len(ids[0]))
-    print("len dataframe:", len(df["ID"].iloc[0]))
 
     id_to_index = {
         id_: idx
         for idx, id_ in enumerate(ids)
     }
-
-    print("Primeiras chaves do dicionário:")
-    print(list(id_to_index.keys())[:10])
-
-    print("TRA1 existe?", "TRA1" in id_to_index)
-    print("ids[0] existe?", ids[0] in id_to_index)
 
     ordered_indices = [
         id_to_index[id_]

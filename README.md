@@ -1,10 +1,40 @@
 # SubFraudGMM
 
-A semi-supervised fraud detection approach in Brazilian public procurement using Gaussian Mixture Models and feature-subset ensembling.
+A semi-supervised fraud detection approach in Brazilian public procurement using Gaussian Mixture Models and feature-subset ensembling, followed by a semantic NLP layer that clusters and audits the flagged records with an LLM.
 
 ---
 
-## Method Overview
+## Two-Stage Pipeline
+
+The project is organised as two chained pipelines:
+
+```
+Operação Patrola (eSfinge / TCE-SP)
+        │
+   notebooks/01  ─ PySpark preprocessing (HPC) ─►  data/*_final.csv
+        │
+ ┌──────┴───────────────────────────────────────────────┐
+ │ STAGE 1 — Quantitative (subfraudgmm.py)               │
+ │   GMM over all feature subsets → Risk Indicator/Rank  │
+ │   → results/SubFraudGMM.csv                           │
+ └──────┬───────────────────────────────────────────────┘
+        │  src/merger_and_cleaner.py  (risk + metadata)
+        │         → data/processed/*_merged.csv
+ ┌──────┴───────────────────────────────────────────────┐
+ │ STAGE 2 — Semantic / NLP layer (src/)                 │
+ │   embedder → graph_construction → community_detection │
+ │   (Leiden) → cluster_definition (LLM auditor)         │
+ │   → per-cluster risk reports (CSV/JSON)               │
+ └───────────────────────────────────────────────────────┘
+```
+
+**Stage 1** (described below) is the replication of the original GMM method.
+**Stage 2** ([see below](#stage-2--semantic-nlp-layer)) is an added layer that groups the records
+semantically and produces an auditor-style risk report per cluster.
+
+---
+
+## Method Overview (Stage 1)
 
 SubFraudGMM detects fraudulent procurement bids without labelled training data.
 The algorithm proceeds in five steps:
@@ -78,18 +108,74 @@ Full metrics table (AUC-ROC, AUC-PR, Precision@k, Recall@k, F1@k) in [`results/m
 
 ---
 
+## Stage 2 — Semantic NLP Layer
+
+After Stage 1 produces a per-record Risk Indicator, the `src/` package groups records
+**semantically** and generates a human-readable risk report per group. This is run **per
+product**, mirroring the product separation of Stage 1.
+
+The flow, and the script that runs each step (all driven by `.toml` files in `parameters/`):
+
+| Step | Script | What it does |
+|---|---|---|
+| 0. Merge | `src/merger_and_cleaner.py` | Joins the preprocessed records with the GMM `Risk Indicator`/`Rank` → `data/processed/*_merged.csv` |
+| 1. Embed | `src/embedder.py` | Embeds the semantic fields (município, empresa, objeto) with a Portuguese legal BERT; checkpointed, sharded to `.pkl` → `.h5` (HDF5) |
+| 2. Graph | `src/graph_construction.py` | Builds a symmetric k-NN cosine-similarity graph (FAISS) over centred embeddings, with a similarity threshold |
+| 3. Communities | `src/community_detection.py` | Leiden (`CPMVertexPartition`) community detection, resolution selected by modularity |
+| 4. Audit | `src/cluster_definition.py` | Sends representative records of each cluster to a local LLM (Ollama) acting as a senior procurement auditor; parses the output into structured CSV/JSON, and records each cluster's most-similar cluster |
+| 5. Distinguish (optional) | `src/cluster_distinction.py` | For each cluster, asks the LLM what minimally separates it from its most-similar cluster — surfacing artificial splitting (fracionamento, rotating-winner cartel, shell suppliers) |
+| 6. Trends (optional) | `src/extract_trends.py` | Splits each cluster by year (old vs. recent) and computes rising/falling suppliers and risk-signal trends; the LLM narrates the evolution and flags cartel consolidation / price escalation |
+| 7. Collusion network (optional) | `src/collusion_network.py` | Builds a supplier↔supplier graph (linked by shared managing units), runs Leiden to surface candidate collusion rings spanning clusters/municipalities, scores them, and has the LLM characterise each ring (rotation cartel / dominator+shell / legitimate) |
+
+Configuration lives in `parameters/`:
+
+| File | Controls |
+|---|---|
+| `directories.toml` | Product list and data paths (`raw`/`processed`/`checkpoints`/`output`) |
+| `ingestion/initial_embedding.toml` | Embedding model, batch size, shard size |
+| `clustering.toml` | k-NN neighbours, similarity threshold, centring; Leiden resolution sweep |
+| `analysis/semantic.toml` | LLM model/temperature and records-per-cluster sent to the auditor |
+
+Key dependencies for this stage (not in `requirements.txt` yet): `sentence-transformers`,
+`faiss`, `python-igraph`, `leidenalg`, `h5py`, `langchain-ollama`, `psutil`, `tqdm`,
+`python-dotenv`. A running [Ollama](https://ollama.com) instance with the configured model
+(default `qwen2.5:7b`) is required for step 4. `src/config/settings.py` reads
+`LOCAL_BASEPATH` from a `keys.env` file at the repo root (used by the merge step).
+
+> **Note on the LLM auditor prompt:** the system prompt frames the model as an expert in
+> Brazilian procurement law (Lei 8.666/93, 14.133/21, 10.520/02). This is *persona priming*,
+> not a knowledge source — the model is not given the statutes' text, so specific article
+> citations should be treated with caution. The detection itself relies on the quantitative
+> risk signals injected into each record, not on legal citations.
+
+---
+
 ## Repository Structure
 
 ```
 SubFraudGMM/
-├── subfrauda_gmm.py              # SubFraudGMM algorithm as a Python module
+├── subfraudgmm.py                # Stage 1: SubFraudGMM algorithm as a Python module
 ├── notebooks/
 │   ├── 01_data_preprocessing.ipynb   # PySpark preprocessing (requires HPC + eSfinge data)
 │   ├── 02_model_training.ipynb       # Run SubFraudGMM across all datasets and thresholds
 │   ├── 03_analysis.ipynb             # Load intermediary results, compute Risk Indicator
 │   └── 04_benchmark_comparison.ipynb # Compare SubFraudGMM vs ADBench baselines
+├── src/                          # Stage 2: semantic NLP layer
+│   ├── merger_and_cleaner.py         # Merge GMM risk into the record metadata
+│   ├── embedder.py                   # BERT embeddings → sharded HDF5
+│   ├── graph_construction.py         # k-NN similarity graph (FAISS)
+│   ├── community_detection.py        # Leiden community detection
+│   ├── cluster_definition.py         # LLM auditor + structured CSV/JSON output
+│   ├── cluster_distinction.py        # (optional) contrast each cluster with its nearest twin
+│   ├── extract_trends.py             # (optional) per-cluster temporal trends (rising/falling actors)
+│   ├── collusion_network.py          # (optional) supplier collusion-ring detection (Leiden over a co-market graph)
+│   ├── classes/                      # Dataclasses (Embeddings)
+│   ├── config/settings.py            # Paths for the merge step (reads keys.env)
+│   ├── pipeline/ · processing/       # Dataset merge + risk aggregation helpers
+│   └── utils/                        # parsing, IO, embedding, graph, hypersphere, checkpoints
+├── parameters/                   # .toml configuration for the NLP layer
 ├── data/                         # Pre-processed dataset CSVs (4 files)
-├── results/                      # Pre-computed model outputs and metrics
+├── results/                      # Pre-computed Stage-1 outputs and metrics
 │   ├── SubFraudGMM.csv
 │   ├── RankingSimples.csv
 │   ├── DeepSAD.csv / DevNet.csv / FEAWAD.csv / PReNet.csv / REPEN.csv / XGBOD.csv
@@ -132,6 +218,22 @@ Outputs are written to `results/intermediary/` (~576 CSV files, excluded from gi
 Notebook 01 requires PySpark and the raw eSfinge data files available only in the
 original HPC cluster environment. The preprocessed CSVs in `data/` are provided
 so that notebooks 02–04 can be run standalone.
+
+### Run the Stage 2 semantic layer
+
+Run from the repository root (the scripts `chdir` to the project root automatically and
+read their defaults from `parameters/`). Step 4 needs a running Ollama instance.
+
+```bash
+python src/merger_and_cleaner.py      # data/processed/*_merged.csv
+python src/embedder.py                # embeddings → sharded HDF5
+python src/graph_construction.py      # k-NN similarity graph
+python src/community_detection.py     # Leiden communities → *_clustered.csv
+python src/cluster_definition.py      # LLM auditor → per-cluster reports (CSV/JSON)
+python src/cluster_distinction.py     # (optional) contrast each cluster with its nearest twin
+python src/extract_trends.py          # (optional) rising/falling suppliers & risk-signal trends per cluster
+python src/collusion_network.py       # (optional) supplier collusion-ring detection across the whole product
+```
 
 ---
 

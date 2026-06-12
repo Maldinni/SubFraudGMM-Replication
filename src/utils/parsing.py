@@ -1,3 +1,4 @@
+import os
 import re
 import argparse
 import tomllib
@@ -5,10 +6,20 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+def chdir_to_project_root() -> Path:
+    """Muda o CWD para a raiz do projeto, independentemente de onde o script foi lançado.
+
+    Os caminhos default dos parâmetros (``parameters/...``) e os diretórios de dados são
+    relativos à raiz. Este helper a deriva de ``__file__`` (utils/ → src/ → raiz), então é
+    idempotente — chamar duas vezes não "sobe" diretórios a mais como ``os.chdir('..')`` faria.
+    """
+    project_root = Path(__file__).resolve().parents[2]
+    os.chdir(project_root)
+    return project_root
+
+
 def load_toml(path: str | Path) -> Dict[str, Any]:
-    p = Path(path)
-    raw = p.read_bytes()
-    with open(p, "rb") as f:
+    with open(Path(path), "rb") as f:
         return tomllib.load(f)
 
 
@@ -37,8 +48,10 @@ def load_config(args: argparse.Namespace) -> Dict[str, Any]:
         "initial_embedding": initial_embedding_file,
         "graph_construction": graph_construction_file["graph_construction"],
         "community_detection": graph_construction_file["community_detection"],
+        "collusion_network": graph_construction_file.get("collusion_network", {}),
         "definition": cluster_definition_file["definition"],
         "llm": cluster_definition_file["llm"],
+        "trends": cluster_definition_file.get("trends", {}),
     }
 
     return cfg
@@ -111,3 +124,23 @@ def parse_cluster_definition(filepath):
         parsed[field] = clean_llm_text(body) if body else "Sem indícios detectados"
 
     return parsed
+
+
+def parse_distinction_file(filepath):
+    """
+    Parsing da saída do passo de distinção entre clusters (cluster_distinction.py).
+
+    O prompt pede as diferenças sob um cabeçalho "DIFERENÇAS:". Mantemos apenas o
+    corpo após esse cabeçalho (descartando o raciocínio anterior, se houver) e o
+    normalizamos numa única string. Se o cabeçalho não aparecer, limpamos o texto
+    inteiro como fallback.
+    """
+    with open(filepath, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    idx = text.lower().find("diferenças")
+    if idx != -1:
+        text = text[idx + len("diferenças"):].lstrip(": \n")
+
+    cleaned = clean_llm_text(text)
+    return cleaned if cleaned else "Sem diferenças detectadas"

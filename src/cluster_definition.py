@@ -7,7 +7,7 @@ from pathlib import Path
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 
-from utils.parsing import parse_args, load_config, extract_cluster_id, parse_cluster_definition
+from utils.parsing import parse_args, load_config, extract_cluster_id, parse_cluster_definition, chdir_to_project_root
 from utils.hypersphere import get_representative_articles, get_centroids
 from utils.load_data import ensure_dirs, load_embedding_shards, align_to_df
 
@@ -19,10 +19,21 @@ DEFINITION_PROMPT = ChatPromptTemplate.from_messages(
             """
     Você é um auditor fiscal sênior com 20 anos de experiência em controle interno de licitações públicas brasileiras, especializado em detecção de fraudes, conluio entre fornecedores (cartel de licitação), direcionamento de edital e superfaturamento.
 
-    Seu raciocínio segue a metodologia de auditoria baseada em risco do TCU (Tribunal de Contas da União). Você conhece profundamente:
-    - A Lei 8.666/93, Lei 14.133/21 e Lei 10.520/02 (Pregão)
+    Seu raciocínio segue a metodologia de auditoria baseada em risco do TCU (Tribunal de Contas da União). Você domina:
     - Indicadores quantitativos de risco: win rate anômalo, concentração de fornecedores, variação de preços, frequência de participação
     - Padrões comportamentais suspeitos: vencedor recorrente, participantes fictícios (bid-rigging), preços combinados, janelas de tempo curtas
+
+    ### BASE LEGAL DE REFERÊNCIA
+    Use EXCLUSIVAMENTE os dispositivos abaixo ao fundamentar um indício. Cada linha mapeia um tipo de irregularidade ao(s) dispositivo(s) aplicável(is):
+
+    - Conluio / cartel (bid-rigging): Lei 8.666/93, art. 90 (frustrar ou fraudar o caráter competitivo); Lei 14.133/21 — crimes inseridos no Código Penal, art. 337-F (fraude em licitação); Lei 12.529/11, art. 36, §3º, I (cartel como infração à ordem econômica).
+    - Direcionamento de edital (especificação restritiva): Lei 8.666/93, art. 3º, §1º, I (vedação a cláusulas que restrinjam a competição); Lei 14.133/21, art. 9º (vedações ao agente público) e art. 25 (regras do edital).
+    - Superfaturamento / sobrepreço: Lei 8.666/93, art. 96 (elevar arbitrariamente os preços); Lei 14.133/21, art. 6º, LVI (sobrepreço) e LVII (superfaturamento).
+    - Fracionamento indevido da despesa: Lei 8.666/93, art. 23, §5º (vedação ao fracionamento para alterar a modalidade); Lei 14.133/21, art. 75, §3º (vedação ao fracionamento na contratação direta).
+    - Participante fictício / empresa de fachada: enquadra-se na frustração do caráter competitivo — Lei 8.666/93, art. 90, e Lei 14.133/21 / Código Penal, art. 337-F.
+    - Modalidade Pregão (contexto): Lei 10.520/02.
+
+    REGRA DE CITAÇÃO (obrigatória): cite número de artigo APENAS quando ele constar da tabela acima e for de fato aplicável ao indício. Se nenhum dispositivo da tabela se aplicar, descreva o indício pelo SINAL QUANTITATIVO que o sustenta (ex.: "win = 0,95 com 2 participantes") e escreva "sem dispositivo aplicável na base de referência" — NUNCA invente, suponha ou cite de memória um número de artigo fora desta tabela.
 
     Ao analisar, você pensa em voz alta de forma estruturada antes de concluir. Nunca omite campos mesmo se a evidência for fraca — registre "Sem indícios detectados" nesses casos.
     """
@@ -77,7 +88,7 @@ DEFINITION_PROMPT = ChatPromptTemplate.from_messages(
     Identifique padrões temporais, geográficos, de participação ou de especificação que se repetem entre registros.
 
     **[6] INDÍCIOS DE RISCO OU FRAUDE**
-    Para cada indício encontrado, cite o campo que o sustenta e classifique a severidade:
+    Para cada indício encontrado, cite o campo que o sustenta, o dispositivo legal da BASE LEGAL DE REFERÊNCIA quando aplicável (seguindo a REGRA DE CITAÇÃO), e classifique a severidade:
     🔴 ALTO | 🟡 MÉDIO | 🟢 BAIXO | ⚪ SEM INDÍCIO
 
     Tipos a verificar explicitamente:
@@ -216,6 +227,7 @@ def define_clusters_for_product(product, cfg, definition_chain):
 
 
 def main():
+    chdir_to_project_root()
     args = parse_args()
     cfg = load_config(args)
 
@@ -312,6 +324,7 @@ def convert_product(product, cfg):
 
 
 def json_converter():
+    chdir_to_project_root()
     args = parse_args()
     cfg = load_config(args)
 
@@ -324,6 +337,5 @@ def json_converter():
 
 
 if __name__ == '__main__':
-    os.chdir('..')
     main()
     json_converter()

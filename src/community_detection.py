@@ -6,7 +6,7 @@ import igraph as ig
 from pathlib import Path
 from collections import deque
 
-from utils.parsing import parse_args, load_config
+from utils.parsing import parse_args, load_config, chdir_to_project_root
 from utils.load_data import ensure_dirs, save_organized_clusters
 from utils.organizing import ordenate_clusters, split_clusters
 
@@ -40,11 +40,15 @@ def detect_communities_for_product(product, cfg):
                                         max_resolution_parameter,
                                         num_resolution_parameter)
 
+    # O parâmetro de resolução do CPM não tem escala natural: varremos uma faixa de
+    # resoluções (cada uma otimizada pela função de qualidade CPM) e selecionamos a
+    # partição que maximiza a MODULARIDADE — uma medida quase livre de escala. Daí o
+    # particionamento ser CPM mas o critério de seleção ser modularidade (intencional).
     modularity_values = np.zeros(num_resolution_parameter)
-    num_unique_clusters = np.zeros(num_resolution_parameter)
 
     decreasing = deque(np.zeros(5, dtype=bool))
 
+    last_evaluated = 0
     for i, resolution_parameter in enumerate(resolution_parameters):
         partition = leidenalg.find_partition(
             G,
@@ -53,7 +57,7 @@ def detect_communities_for_product(product, cfg):
             resolution_parameter=resolution_parameter)
 
         modularity_values[i] = G.modularity(partition.membership, weights='weight')
-        num_unique_clusters[i] = len(np.unique(partition.membership))
+        last_evaluated = i
 
         if i > 0:
             decreasing.popleft()
@@ -63,7 +67,11 @@ def detect_communities_for_product(product, cfg):
             print(f'[{product}] modularity is decreasing, breaking')
             break
 
-    best_resolution_parameter = resolution_parameters[np.argmax(modularity_values)]
+    # argmax apenas sobre as resoluções de fato avaliadas: com early-stopping o restante
+    # do array fica zerado, e um argmax cego escolheria uma resolução nunca testada caso
+    # todas as modularidades avaliadas fossem negativas.
+    best_idx = int(np.argmax(modularity_values[:last_evaluated + 1]))
+    best_resolution_parameter = resolution_parameters[best_idx]
     partition = leidenalg.find_partition(
         G,
         leidenalg.CPMVertexPartition,
@@ -96,7 +104,7 @@ def detect_communities_for_product(product, cfg):
 
 
 def main():
-    os.chdir('..')  # Change to project root directory
+    chdir_to_project_root()
     args = parse_args()
     cfg = load_config(args)
 
