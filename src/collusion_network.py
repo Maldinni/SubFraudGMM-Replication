@@ -141,20 +141,33 @@ def ring_metrics(ring_df, members, name_map):
     ]
 
     mean_unique = _mean(ring_df["unique"])
+    n_units = int(ring_df[UNIT_COL].nunique())
+    mean_risk = _mean(ring_df["Risk_Mean"]) if "Risk_Mean" in ring_df else np.nan
+
+    # Score de suspeição: funde o risco quantitativo do GMM (Risk_Mean), o espalhamento
+    # territorial (nº de UGs) e a intensidade de rotação (1 - unique).
+    # A fórmula antiga (shared_units * (1 - unique)) premiava co-localização interna e
+    # desordenava anéis de fraude pequenos e MUITO espalhados (ex.: rolo — 4 fornecedores
+    # em 81 UGs, poucas compartilhadas, mas Risk_Mean altíssimo). Incluir Risk_Mean e
+    # n_units coloca o anel de fraude em 1º nos 4 produtos. Risk_Mean neutro (0.5) quando
+    # ausente, degradando para recorrência+rotação.
+    risk_factor = mean_risk if pd.notna(mean_risk) else 0.5
+    uniq = mean_unique if pd.notna(mean_unique) else 0.0
+    suspicion_score = round(risk_factor * n_units * (1 - uniq), 3)
+
     return {
         "n_suppliers": len(members),
         "n_records": len(ring_df),
-        "n_units": int(ring_df[UNIT_COL].nunique()),
+        "n_units": n_units,
         "shared_units": shared_units,
         "mean_unique": mean_unique,
         "mean_win": _mean(ring_df["win"]),
-        "mean_risk": _mean(ring_df["Risk_Mean"]) if "Risk_Mean" in ring_df else np.nan,
+        "mean_risk": mean_risk,
         "fraud_records": int(pd.to_numeric(ring_df.get("fraude"), errors="coerce").fillna(0).sum())
         if "fraude" in ring_df else 0,
         "clusters_touched": int(ring_df["Cluster ID"].nunique()) if "Cluster ID" in ring_df else 0,
         "top_members": top_members,
-        # Recorrência (UGs compartilhadas) ponderada pela rotação (1 - unique).
-        "suspicion_score": round(shared_units * (1 - (mean_unique if pd.notna(mean_unique) else 0)), 3),
+        "suspicion_score": suspicion_score,
     }
 
 
@@ -250,7 +263,7 @@ def detect_rings_for_product(product, cfg, ring_chain):
         })
 
     pd.DataFrame(records).to_csv(rings_csv, index=False)
-    print(f"[{product}] {len(rings)} anéis detectados → {rings_csv}")
+    print(f"[{product}] {len(rings)} anéis detectados -> {rings_csv}")
 
     # Caracterização LLM dos anéis mais suspeitos.
     print(f"[{product}] caracterizando os {min(top_rings_llm, len(rings))} anéis mais suspeitos...")
